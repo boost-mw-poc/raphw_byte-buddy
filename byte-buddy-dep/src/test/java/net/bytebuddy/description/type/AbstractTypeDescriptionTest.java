@@ -9,6 +9,7 @@ import net.bytebuddy.description.field.FieldDescription;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.method.ParameterDescription;
 import net.bytebuddy.dynamic.ClassFileLocator;
+import net.bytebuddy.dynamic.DynamicType;
 import net.bytebuddy.dynamic.loading.ByteArrayClassLoader;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.dynamic.loading.PackageDefinitionStrategy;
@@ -42,6 +43,7 @@ import java.lang.reflect.MalformedParameterizedTypeException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -65,6 +67,10 @@ import static org.mockito.Mockito.when;
 public abstract class AbstractTypeDescriptionTest extends AbstractTypeDescriptionGenericVariableDefiningTest {
 
     private static final String FOO = "foo", BAR = "bar";
+
+    private static final String SAMPLE_INTERFACE_GRAPH = "net.bytebuddy.test.SampleInterfaceGraph$";
+
+    private static final int INTERFACE_GRAPH_DEPTH = 30;
 
     @Rule
     public MethodRule javaVersionRule = new JavaVersionRule();
@@ -519,6 +525,38 @@ public abstract class AbstractTypeDescriptionTest extends AbstractTypeDescriptio
         assertThat(describe(SimpleType.class).isAssignableTo(describe(otherSimpleType)), is(true));
         assertThat(describe(Object.class).isAssignableFrom(describe(otherSimpleType)), is(true));
         assertThat(describe(otherSimpleType).isAssignableTo(describe(Object.class)), is(true));
+    }
+
+    @Test(timeout = 60000)
+    public void testIsAssignableInterfaceGraph() throws Exception {
+        Map<String, byte[]> types = new HashMap<String, byte[]>();
+        DynamicType.Unloaded<?> left = new ByteBuddy().makeInterface().name(SAMPLE_INTERFACE_GRAPH + "0" + FOO).make(),
+                right = new ByteBuddy().makeInterface().name(SAMPLE_INTERFACE_GRAPH + "0" + BAR).make();
+        types.put(left.getTypeDescription().getName(), left.getBytes());
+        types.put(right.getTypeDescription().getName(), right.getBytes());
+        for (int index = 1; index < INTERFACE_GRAPH_DEPTH; index++) {
+            DynamicType.Unloaded<?> previousLeft = left, previousRight = right;
+            left = new ByteBuddy()
+                    .makeInterface(previousLeft.getTypeDescription(), previousRight.getTypeDescription())
+                    .name(SAMPLE_INTERFACE_GRAPH + index + FOO)
+                    .make();
+            right = new ByteBuddy()
+                    .makeInterface(previousLeft.getTypeDescription(), previousRight.getTypeDescription())
+                    .name(SAMPLE_INTERFACE_GRAPH + index + BAR)
+                    .make();
+            types.put(left.getTypeDescription().getName(), left.getBytes());
+            types.put(right.getTypeDescription().getName(), right.getBytes());
+        }
+        DynamicType.Unloaded<?> unrelated = new ByteBuddy().makeInterface().name(SAMPLE_INTERFACE_GRAPH + FOO + BAR).make();
+        types.put(unrelated.getTypeDescription().getName(), unrelated.getBytes());
+        ClassLoader classLoader = new ByteArrayClassLoader(ClassLoadingStrategy.BOOTSTRAP_LOADER,
+                types,
+                ByteArrayClassLoader.PersistenceHandler.MANIFEST);
+        TypeDescription typeDescription = describe(classLoader.loadClass(left.getTypeDescription().getName()));
+        assertThat(describe(classLoader.loadClass(unrelated.getTypeDescription().getName())).isAssignableFrom(typeDescription), is(false));
+        assertThat(typeDescription.isAssignableTo(describe(classLoader.loadClass(unrelated.getTypeDescription().getName()))), is(false));
+        assertThat(describe(classLoader.loadClass(SAMPLE_INTERFACE_GRAPH + "0" + BAR)).isAssignableFrom(typeDescription), is(true));
+        assertThat(typeDescription.isAssignableTo(describe(classLoader.loadClass(SAMPLE_INTERFACE_GRAPH + "0" + BAR))), is(true));
     }
 
     @Test

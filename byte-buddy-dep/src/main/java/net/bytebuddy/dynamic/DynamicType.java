@@ -7530,7 +7530,8 @@ public interface DynamicType extends ClassFileLocator {
                     files.put(getTypeDescription().getInternalName() + CLASS_FILE_EXTENSION, getBytes());
                     JarEntry jarEntry;
                     while ((jarEntry = jarInputStream.getNextJarEntry()) != null) {
-                        byte[] replacement = files.remove(jarEntry.getName());
+                        String name = FileSystem.validated(jarEntry.getName());
+                        byte[] replacement = files.remove(name);
                         if (replacement == null) {
                             jarOutputStream.putNextEntry(jarEntry);
                             byte[] buffer = new byte[1024];
@@ -7539,7 +7540,7 @@ public interface DynamicType extends ClassFileLocator {
                                 jarOutputStream.write(buffer, 0, index);
                             }
                         } else {
-                            jarOutputStream.putNextEntry(new JarEntry(jarEntry.getName()));
+                            jarOutputStream.putNextEntry(new JarEntry(name));
                             jarOutputStream.write(replacement);
                         }
                         jarInputStream.closeEntry();

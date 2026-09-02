@@ -3524,7 +3524,7 @@ public interface Plugin extends ElementMatcher<TypeDescription>, Closeable {
                      */
                     public void retain(Source.Element element) throws IOException {
                         JarEntry entry = element.resolveAs(JarEntry.class);
-                        String name = element.getName();
+                        String name = FileSystem.validated(element.getName());
                         outputStream.putNextEntry(entry == null
                                 ? new JarEntry(name)
                                 : entry);

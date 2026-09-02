@@ -267,6 +267,26 @@ public class DynamicTypeDefaultTest {
         assertThat(fileDeletion, is(true));
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testJarTargetInjectionRelativeLocation() throws Exception {
+        File sourceFile = temporaryFolder.newFile();
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, BAR);
+        OutputStream outputStream = new FileOutputStream(sourceFile);
+        try {
+            JarOutputStream jarOutputStream = new JarOutputStream(outputStream, manifest);
+            jarOutputStream.putNextEntry(new JarEntry("../illegal" + CLASS_FILE_EXTENSION));
+            jarOutputStream.write(BINARY_THIRD);
+            jarOutputStream.closeEntry();
+            jarOutputStream.close();
+        } finally {
+            outputStream.close();
+        }
+        File file = temporaryFolder.newFile();
+        assertThat(file.delete(), is(true));
+        dynamicType.inject(sourceFile, file);
+    }
+
     @Test
     public void testJarSelfInjection() throws Exception {
         File file = temporaryFolder.newFile();

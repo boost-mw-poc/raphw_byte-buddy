@@ -7853,8 +7853,22 @@ public interface TypeDescription extends TypeDefinition, ByteCodeElement, TypeVa
          * @param targetType The target type that is to be assigned to the source type.
          * @return {@code true} if the target type is assignable to the source type.
          */
-        @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "Assuming component type for array type.")
         private static boolean isAssignable(TypeDescription sourceType, TypeDescription targetType) {
+            return isAssignable(sourceType, targetType, null);
+        }
+
+        /**
+         * Checks if a specific type is assignable to another type where the source type must be a super
+         * type of the target type.
+         *
+         * @param sourceType The source type to which another type is to be assigned to.
+         * @param targetType The target type that is to be assigned to the source type.
+         * @param previous   The interface types that were already resolved during this assignability check
+         *                   or {@code null} if no interface type was resolved yet.
+         * @return {@code true} if the target type is assignable to the source type.
+         */
+        @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "Assuming component type for array type.")
+        private static boolean isAssignable(TypeDescription sourceType, TypeDescription targetType, @MaybeNull Set<TypeDescription> previous) {
             // Means that '[sourceType] var = ([targetType]) val;' is a valid assignment. This is true, if:
             // (1) Both types are equal (implies primitive types.)
             if (sourceType.equals(targetType)) {
@@ -7872,14 +7886,22 @@ public interface TypeDescription extends TypeDefinition, ByteCodeElement, TypeVa
             }
             // (4) The sub type has a super type and this super type is assignable to the super type.
             Generic superClass = targetType.getSuperClass();
-            if (superClass != null && sourceType.isAssignableFrom(superClass.asErasure())) {
+            if (superClass != null && isAssignable(sourceType, superClass.asErasure(), previous)) {
                 return true;
             }
-            // (5) If the target type is an interface, any of this type's interfaces might be assignable to it.
+            // (5) If the target type is an interface, any of this type's interfaces might be assignable to it. As an
+            // interface hierarchy forms a directed graph and not a tree, previously resolved interface types are
+            // remembered to avoid resolving the same interface type once for every path that leads to it.
             if (sourceType.isInterface()) {
-                for (TypeDescription interfaceType : targetType.getInterfaces().asErasures()) {
-                    if (sourceType.isAssignableFrom(interfaceType)) {
-                        return true;
+                TypeList interfaceTypes = targetType.getInterfaces().asErasures();
+                if (!interfaceTypes.isEmpty()) {
+                    Set<TypeDescription> visited = previous == null
+                            ? new HashSet<TypeDescription>()
+                            : previous;
+                    for (TypeDescription interfaceType : interfaceTypes) {
+                        if (visited.add(interfaceType) && isAssignable(sourceType, interfaceType, visited)) {
+                            return true;
+                        }
                     }
                 }
             }
