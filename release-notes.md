@@ -1,6 +1,14 @@
 Byte Buddy release notes
 ------------------------
 
+### 2. September 2026: version 1.18.13
+
+- Actually include the SBOM within the published artifacts.
+- Avoid propagation of path traversals that are contained in jar files which are copied without transformation.
+- Avoid repeated traversal of previously visited type hierarchies to improve performance.
+- Correct Kotlin support of the Gradle plugin to redirect the classes directory of a source set while retaining support for legacy Gradle versions.
+- Create Gradle tasks using Gradle's task registration API if available.
+
 ### 17. July 2026: version 1.18.12
 
 - Automatically support Kotlin in Gradle plugin.
