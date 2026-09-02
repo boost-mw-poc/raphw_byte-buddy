@@ -222,7 +222,7 @@ public class KotlinByteBuddyTaskConfiguration implements Action<Project> {
         }
         String taskName = extensionName + "Kotlin";
         project.getLogger().debug("Configuring Byte Buddy Kotlin task for source set '{}' as '{}'", sourceSet.getName(), taskName);
-        ByteBuddyTask byteBuddyTask = (ByteBuddyTask) project.getTasks().create(taskName, extension.toType());
+        ByteBuddyTask byteBuddyTask = (ByteBuddyTask) TaskFactory.create(project, taskName, extension.toType());
         byteBuddyTask.setGroup("Byte Buddy");
         byteBuddyTask.setDescription("Transforms the classes compiled by " + compileTask.getName());
         byteBuddyTask.dependsOn(compileTask);

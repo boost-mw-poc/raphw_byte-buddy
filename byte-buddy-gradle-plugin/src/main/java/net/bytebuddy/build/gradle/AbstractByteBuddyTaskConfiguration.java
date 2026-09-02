@@ -76,7 +76,7 @@ public abstract class AbstractByteBuddyTaskConfiguration<
         } else {
             project.getLogger().debug("Configuring Byte Buddy task for source set '{}' as '{}'", sourceSet.getName(), name);
             AbstractCompile compileTask = (AbstractCompile) project.getTasks().getByName(sourceSet.getCompileJavaTaskName());
-            T byteBuddyTask = project.getTasks().create(name, extension.toType());
+            T byteBuddyTask = TaskFactory.create(project, name, extension.toType());
             byteBuddyTask.setGroup("Byte Buddy");
             byteBuddyTask.setDescription("Transforms the classes compiled by " + compileTask.getName());
             byteBuddyTask.dependsOn(compileTask);
