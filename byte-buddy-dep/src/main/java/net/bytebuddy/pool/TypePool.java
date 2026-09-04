@@ -837,15 +837,7 @@ public interface TypePool {
          * A property that allows to configure the maximum nesting depth that is accepted when parsing a generic
          * type signature. Signatures that nest deeper are treated as if they were malformed.
          */
-        public static final String SIGNATURE_DEPTH_PROPERTY = "net.bytebuddy.signature.depth";
-
-        /**
-         * The maximum nesting depth that is accepted when parsing a generic type signature if the
-         * {@link Default#SIGNATURE_DEPTH_PROPERTY} property is not set. This value exceeds the 255 dimensions that
-         * a class file can at most declare for an array type and any nesting of type arguments that a compiler
-         * would realistically emit.
-         */
-        private static final int DEFAULT_SIGNATURE_DEPTH = 256;
+        public static final String SIGNATURE_DEPTH_PROPERTY = "net.bytebuddy.depth";
 
         /**
          * The maximum nesting depth that is accepted when parsing a generic type signature. As a signature is read
@@ -858,14 +850,14 @@ public interface TypePool {
          * Reads the signature depth property.
          */
         static {
-            int signatureDepth;
+            int signatureDepth = 256;
             try {
                 String property = doPrivileged(new GetSystemPropertyAction(SIGNATURE_DEPTH_PROPERTY));
-                signatureDepth = property == null
-                        ? DEFAULT_SIGNATURE_DEPTH
-                        : Integer.parseInt(property);
+                if (property != null) {
+                    signatureDepth = Math.max(1, Integer.parseInt(property));
+                }
             } catch (Exception ignored) {
-                signatureDepth = DEFAULT_SIGNATURE_DEPTH;
+                /* ignored */
             }
             SIGNATURE_DEPTH = signatureDepth;
         }
