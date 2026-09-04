@@ -840,26 +840,33 @@ public interface TypePool {
         public static final String SIGNATURE_DEPTH_PROPERTY = "net.bytebuddy.depth";
 
         /**
+         * The maximum nesting depth that is accepted when parsing a generic type signature if
+         * {@link Default#SIGNATURE_DEPTH_PROPERTY} does not specify an explicit value.
+         */
+        private static final int DEFAULT_SIGNATURE_DEPTH = 256;
+
+        /**
          * The maximum nesting depth that is accepted when parsing a generic type signature. As a signature is read
          * by a recursive descent parser, an unbounded nesting depth would allow a malformed class file to exhaust
          * the thread's stack.
          */
-        public static final int SIGNATURE_DEPTH;
+        public static final int SIGNATURE_DEPTH = signatureDepth();
 
-        /*
+        /**
          * Reads the signature depth property.
+         *
+         * @return The maximum nesting depth that is accepted when parsing a generic type signature.
          */
-        static {
-            int signatureDepth = 256;
+        @SuppressFBWarnings(value = "REC_CATCH_EXCEPTION", justification = "Exception should not be rethrown but trigger a fallback.")
+        private static int signatureDepth() {
             try {
                 String property = doPrivileged(new GetSystemPropertyAction(SIGNATURE_DEPTH_PROPERTY));
-                if (property != null) {
-                    signatureDepth = Math.max(1, Integer.parseInt(property));
-                }
+                return property == null
+                        ? DEFAULT_SIGNATURE_DEPTH
+                        : Math.max(1, Integer.parseInt(property));
             } catch (Exception ignored) {
-                /* ignored */
+                return DEFAULT_SIGNATURE_DEPTH;
             }
-            SIGNATURE_DEPTH = signatureDepth;
         }
 
         /**
