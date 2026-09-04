@@ -17,6 +17,7 @@ package net.bytebuddy.pool;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import net.bytebuddy.ClassFileVersion;
+import net.bytebuddy.build.AccessControllerPlugin;
 import net.bytebuddy.build.CachedReturnPlugin;
 import net.bytebuddy.build.HashCodeAndEqualsPlugin;
 import net.bytebuddy.description.TypeVariableSource;
@@ -48,6 +49,7 @@ import net.bytebuddy.utility.OpenedClassReader;
 import net.bytebuddy.utility.nullability.AlwaysNull;
 import net.bytebuddy.utility.nullability.MaybeNull;
 import net.bytebuddy.utility.nullability.UnknownNull;
+import net.bytebuddy.utility.privilege.GetSystemPropertyAction;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -69,6 +71,7 @@ import java.lang.annotation.Annotation;
 import java.lang.ref.SoftReference;
 import java.lang.reflect.GenericSignatureFormatError;
 import java.lang.reflect.MalformedParameterizedTypeException;
+import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -831,10 +834,54 @@ public interface TypePool {
     class Default extends AbstractBase.Hierarchical {
 
         /**
-         * Indicates that a visited method should be ignored.
+         * A property that allows to configure the maximum nesting depth that is accepted when parsing a generic
+         * type signature. Signatures that nest deeper are treated as if they were malformed.
          */
-        @AlwaysNull
-        private static final MethodVisitor IGNORE_METHOD = null;
+        public static final String SIGNATURE_DEPTH_PROPERTY = "net.bytebuddy.signature.depth";
+
+        /**
+         * The maximum nesting depth that is accepted when parsing a generic type signature if the
+         * {@link Default#SIGNATURE_DEPTH_PROPERTY} property is not set. This value exceeds the 255 dimensions that
+         * a class file can at most declare for an array type and any nesting of type arguments that a compiler
+         * would realistically emit.
+         */
+        private static final int DEFAULT_SIGNATURE_DEPTH = 256;
+
+        /**
+         * The maximum nesting depth that is accepted when parsing a generic type signature. As a signature is read
+         * by a recursive descent parser, an unbounded nesting depth would allow a malformed class file to exhaust
+         * the thread's stack.
+         */
+        public static final int SIGNATURE_DEPTH;
+
+        /*
+         * Reads the signature depth property.
+         */
+        static {
+            int signatureDepth;
+            try {
+                String property = doPrivileged(new GetSystemPropertyAction(SIGNATURE_DEPTH_PROPERTY));
+                signatureDepth = property == null
+                        ? DEFAULT_SIGNATURE_DEPTH
+                        : Integer.parseInt(property);
+            } catch (Exception ignored) {
+                signatureDepth = DEFAULT_SIGNATURE_DEPTH;
+            }
+            SIGNATURE_DEPTH = signatureDepth;
+        }
+
+        /**
+         * A proxy for {@code java.security.AccessController#doPrivileged} that is activated if available.
+         *
+         * @param action The action to execute from a privileged context.
+         * @param <T>    The type of the action's resolved value.
+         * @return The action's resolved value.
+         */
+        @MaybeNull
+        @AccessControllerPlugin.Enhance
+        private static <T> T doPrivileged(PrivilegedAction<T> action) {
+            return action.run();
+        }
 
         /**
          * The locator to query for finding binary data of a type.
@@ -2359,18 +2406,38 @@ public interface TypePool {
             private final GenericTypeRegistrant genericTypeRegistrant;
 
             /**
+             * The nesting depth of the type that is visited by this extractor where a value of {@code 0}
+             * indicates a type that is not nested within another type.
+             */
+            private final int depth;
+
+            /**
              * The current token that is in the process of creation.
              */
             @UnknownNull
             private IncompleteToken incompleteToken;
 
             /**
-             * Creates a new generic type extractor.
+             * Creates a new generic type extractor for a type that is not nested within another type.
              *
              * @param genericTypeRegistrant The target to receive the complete type.
              */
             protected GenericTypeExtractor(GenericTypeRegistrant genericTypeRegistrant) {
+                this(genericTypeRegistrant, 0);
+            }
+
+            /**
+             * Creates a new generic type extractor.
+             *
+             * @param genericTypeRegistrant The target to receive the complete type.
+             * @param depth                 The nesting depth of the type that is visited by this extractor.
+             */
+            protected GenericTypeExtractor(GenericTypeRegistrant genericTypeRegistrant, int depth) {
+                if (depth > SIGNATURE_DEPTH) {
+                    throw new IllegalStateException("Generic signature exceeds maximum nesting depth of " + SIGNATURE_DEPTH);
+                }
                 this.genericTypeRegistrant = genericTypeRegistrant;
+                this.depth = depth;
             }
 
             /**
@@ -2391,7 +2458,7 @@ public interface TypePool {
              * {@inheritDoc}
              */
             public SignatureVisitor visitArrayType() {
-                return new GenericTypeExtractor(this);
+                return new GenericTypeExtractor(this, depth + 1);
             }
 
             /**
@@ -2405,14 +2472,14 @@ public interface TypePool {
              * {@inheritDoc}
              */
             public void visitClassType(String name) {
-                incompleteToken = new IncompleteToken.ForTopLevelType(name);
+                incompleteToken = new IncompleteToken.ForTopLevelType(name, depth);
             }
 
             /**
              * {@inheritDoc}
              */
             public void visitInnerClassType(String name) {
-                incompleteToken = new IncompleteToken.ForInnerClass(name, incompleteToken);
+                incompleteToken = new IncompleteToken.ForInnerClass(name, incompleteToken, depth);
             }
 
             /**
@@ -2508,31 +2575,47 @@ public interface TypePool {
                     protected final List<LazyTypeDescription.GenericTypeToken> parameters;
 
                     /**
-                     * Creates a new base implementation of an incomplete token.
+                     * The nesting depth of the type that is represented by this token.
                      */
-                    public AbstractBase() {
+                    protected final int depth;
+
+                    /**
+                     * Creates a new base implementation of an incomplete token for a type that is not nested
+                     * within another type.
+                     */
+                    protected AbstractBase() {
+                        this(0);
+                    }
+
+                    /**
+                     * Creates a new base implementation of an incomplete token.
+                     *
+                     * @param depth The nesting depth of the type that is represented by this token.
+                     */
+                    protected AbstractBase(int depth) {
                         parameters = new ArrayList<LazyTypeDescription.GenericTypeToken>();
+                        this.depth = depth;
                     }
 
                     /**
                      * {@inheritDoc}
                      */
                     public SignatureVisitor appendDirectBound() {
-                        return new GenericTypeExtractor(new ForDirectBound());
+                        return new GenericTypeExtractor(new ForDirectBound(), depth + 1);
                     }
 
                     /**
                      * {@inheritDoc}
                      */
                     public SignatureVisitor appendUpperBound() {
-                        return new GenericTypeExtractor(new ForUpperBound());
+                        return new GenericTypeExtractor(new ForUpperBound(), depth + 1);
                     }
 
                     /**
                      * {@inheritDoc}
                      */
                     public SignatureVisitor appendLowerBound() {
-                        return new GenericTypeExtractor(new ForLowerBound());
+                        return new GenericTypeExtractor(new ForLowerBound(), depth + 1);
                     }
 
                     /**
@@ -2594,11 +2677,23 @@ public interface TypePool {
                     private final String internalName;
 
                     /**
-                     * Creates a new incomplete token representing a type without an outer type.
+                     * Creates a new incomplete token representing a type without an outer type that is not
+                     * nested within another type.
                      *
                      * @param internalName The internal name of the type.
                      */
                     public ForTopLevelType(String internalName) {
+                        this(internalName, 0);
+                    }
+
+                    /**
+                     * Creates a new incomplete token representing a type without an outer type.
+                     *
+                     * @param internalName The internal name of the type.
+                     * @param depth        The nesting depth of the type that is represented by this token.
+                     */
+                    protected ForTopLevelType(String internalName, int depth) {
+                        super(depth);
                         this.internalName = internalName;
                     }
 
@@ -2654,6 +2749,18 @@ public interface TypePool {
                      * @param outerTypeToken The incomplete token representing the outer type.
                      */
                     public ForInnerClass(String internalName, IncompleteToken outerTypeToken) {
+                        this(internalName, outerTypeToken, 0);
+                    }
+
+                    /**
+                     * Creates a new incomplete token representing a type without an outer type.
+                     *
+                     * @param internalName   The internal name of the type.
+                     * @param outerTypeToken The incomplete token representing the outer type.
+                     * @param depth          The nesting depth of the type that is represented by this token.
+                     */
+                    protected ForInnerClass(String internalName, IncompleteToken outerTypeToken, int depth) {
+                        super(depth);
                         this.internalName = internalName;
                         this.outerTypeToken = outerTypeToken;
                     }
@@ -9168,7 +9275,7 @@ public interface TypePool {
             @MaybeNull
             public MethodVisitor visitMethod(int modifiers, String internalName, String descriptor, @MaybeNull String genericSignature, @MaybeNull String[] exceptionName) {
                 return internalName.equals(MethodDescription.TYPE_INITIALIZER_INTERNAL_NAME)
-                        ? IGNORE_METHOD
+                        ? null
                         : new MethodExtractor(modifiers & REAL_MODIFIER_MASK, internalName, descriptor, genericSignature, exceptionName);
             }
 
